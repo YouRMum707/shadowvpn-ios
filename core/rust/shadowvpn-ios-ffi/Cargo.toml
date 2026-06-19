@@ -55,6 +55,15 @@ thiserror = "2.0"
 # Low-level FFI glue + mach RSS sampling.
 libc = "0.2"
 
+# Runtime country → CIDR extraction from a bundled MaxMind GeoLite2 Country
+# mmdb (svpn_country_cidrs_file). Both are pure Rust (no C deps), so they
+# cross-compile cleanly to aarch64-apple-ios{,-sim}; `maxminddb` is loaded via
+# `Reader::from_source(Vec<u8>)` so we never touch its optional `mmap` feature.
+# Mirrors upstream shadowvpn `policy::geoip`, but the result is cached to a file
+# so the (comparatively expensive) mmdb walk runs at most once per country.
+maxminddb = "0.28.1"
+ipnetwork = "0.21.1"
+
 [build-dependencies]
 # Emits include/shadowvpn_core.h from the `#[no_mangle]` C ABI in `lib.rs`.
 cbindgen = "0.28"

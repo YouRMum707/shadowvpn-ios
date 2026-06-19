@@ -243,6 +243,9 @@ final class VpnManager {
             config["mtu"] = profile.mtu
             config["dns_local"] = profile.dnsLocal
             config["dns_remote"] = profile.dnsRemote
+            // The country whose CIDRs bypass the tunnel; the extension derives
+            // the route set from the bundled mmdb at start (cached per country).
+            config["country"] = profile.bypassCountry
             config["profileID"] = profile.id.uuidString
             config["profileName"] = profile.name
         }

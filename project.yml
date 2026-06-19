@@ -143,17 +143,19 @@ targets:
   # -------------------------------------------------------------------------
   # The NetworkExtension packet-tunnel provider.
   #
-  # Bundles its own copy of chnroute.txt (from Shared/Resources) so the
-  # extension can read the China CIDR set directly out of its own bundle when
-  # building NEPacketTunnelNetworkSettings excludedRoutes — the NE process can
-  # only read its own bundle, not the app's.
+  # Bundles the MaxMind GeoLite2 Country.mmdb (from Shared/Resources) so the
+  # extension can derive ANY country's bypass-CIDR set at runtime — the user
+  # picks the country in Settings. The first time a country is requested the
+  # core (svpn_country_cidrs_file) extracts it from the mmdb and caches the
+  # result to a file in the App Group container; later starts reuse the cache.
+  # The NE process can only read its own bundle, so the mmdb lives here.
   # -------------------------------------------------------------------------
   PacketTunnel:
     type: app-extension
     platform: iOS
     sources:
       - path: PacketTunnel/Sources
-      - path: Shared/Resources/chnroute.txt
+      - path: Shared/Resources/Country.mmdb
         buildPhase: resources
     info:
       path: PacketTunnel/Info.plist

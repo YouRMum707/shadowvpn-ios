@@ -29,6 +29,9 @@ struct SettingsView: View {
             serverSection
             securitySection
             routingSection
+            if form.mode != .full {
+                bypassCountrySection
+            }
             if form.showsDNSFields {
                 dnsSection
             }
@@ -128,6 +131,32 @@ struct SettingsView: View {
         case .full: "settings.mode.full.footer"
         case .chnroute: "settings.mode.chnroute.footer"
         case .chinadns: "settings.mode.chinadns.footer"
+        }
+    }
+
+    // MARK: - Bypass country (split modes)
+
+    /// Which country's IP ranges go *direct* (bypass the tunnel) in the split
+    /// modes. The set is extracted from the bundled MaxMind mmdb at connect time
+    /// and cached per country, so any of the curated codes — or a custom one the
+    /// user previously saved — works without an app update.
+    private var bypassCountrySection: some View {
+        Section {
+            Picker("settings.field.country", selection: $form.bypassCountry) {
+                // Keep a saved code that isn't in the curated list selectable so
+                // editing the rest of the form never silently drops it.
+                if !form.bypassCountry.isEmpty, Country.named(form.bypassCountry) == nil {
+                    Text(form.bypassCountry).tag(form.bypassCountry)
+                }
+                ForEach(Country.catalog) { country in
+                    Text(country.pickerLabel).tag(country.code)
+                }
+            }
+            .accessibilityIdentifier("settings.field.country")
+        } header: {
+            Text("settings.section.country")
+        } footer: {
+            Text("settings.section.country.footer")
         }
     }
 

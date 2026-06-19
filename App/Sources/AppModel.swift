@@ -40,11 +40,12 @@ final class AppModel {
         didBootstrap = true
 
         // Mark the persistent profile store as backup-eligible and exclude the
-        // transient state/traffic/log/chnroute files (mirrors meow).
+        // transient state/traffic/log files and the per-country CIDR cache
+        // (mirrors meow).
         AppGroup.configureBackup()
-        // Stage chnroute.txt into the App Group so the extension can read the
-        // China CIDR set from a stable shared path.
-        ChnrouteStager.stageIfNeeded()
+        // The bypass-CIDR set is derived from the bundled mmdb inside the
+        // extension at tunnel start (svpn_country_cidrs_file) and cached per
+        // country in the App Group — no app-side staging step is needed.
         // Persist the (possibly defaulted) profile so the extension always has
         // a copy to read at start time even on a brand-new install.
         try? SharedStore.writeProfile(profile)

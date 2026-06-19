@@ -22,6 +22,8 @@ final class EditableProfile {
     var mode: TunnelMode
     var dnsLocal: String
     var dnsRemote: String
+    /// ISO alpha-2 country code whose CIDRs bypass the tunnel (split modes).
+    var bypassCountry: String
     /// String-backed MTU; coerced to `Int` in ``makeProfile()``.
     var mtuText: String
 
@@ -36,6 +38,7 @@ final class EditableProfile {
         mode = profile.mode
         dnsLocal = profile.dnsLocal
         dnsRemote = profile.dnsRemote
+        bypassCountry = profile.bypassCountry
         mtuText = String(profile.mtu)
     }
 
@@ -83,6 +86,7 @@ final class EditableProfile {
             dnsLocal: dnsLocal.trimmingCharacters(in: .whitespaces),
             dnsRemote: dnsRemote.trimmingCharacters(in: .whitespaces),
             mtu: mtu,
+            bypassCountry: bypassCountry.trimmingCharacters(in: .whitespaces).uppercased(),
         )
     }
 

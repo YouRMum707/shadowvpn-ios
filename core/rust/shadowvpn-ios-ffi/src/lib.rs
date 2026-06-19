@@ -34,6 +34,7 @@
 //! use-after-free meow documents.
 
 mod config;
+mod country;
 mod dns_intercept;
 mod engine;
 mod logging;
@@ -127,6 +128,66 @@ pub unsafe extern "C" fn svpn_core_set_home_dir(dir: *const c_char) {
 #[no_mangle]
 pub extern "C" fn svpn_core_last_error() -> *const c_char {
     LAST_ERROR.with(|e| e.borrow().as_ptr())
+}
+
+// ---------------------------------------------------------------------------
+// Country → CIDR resolution (runtime split-tunnel bypass set, cached)
+// ---------------------------------------------------------------------------
+
+/// Resolve the bypass-CIDR file for an ISO country code, extracting it from the
+/// bundled MaxMind GeoLite2 Country mmdb the first time and caching it.
+///
+/// Writes the absolute path of the cache file (`<cache_dir>/chnroute-<COUNTRY>-
+/// <mmdb_len>.txt`, plain `a.b.c.d/len`-per-line text) into `out`/`out_cap`,
+/// NUL-terminated. Returns the number of bytes the path needs (excluding the
+/// NUL); if the return value is `>= out_cap` the path was truncated — allocate
+/// `ret + 1` and call again. Returns `-1` on error (inspect
+/// `svpn_core_last_error`): a missing/invalid mmdb, an unknown country, or an
+/// unwritable cache directory.
+///
+/// The expensive mmdb walk runs at most once per `(country, mmdb)`; later calls
+/// return the cached path immediately. Swift parses the returned file for
+/// `NEPacketTunnelNetworkSettings.excludedRoutes` and passes the same path back
+/// as `config_json["chnroute_path"]` for the chinadns decision.
+///
+/// # Safety
+/// `mmdb_path`, `country`, and `cache_dir` must each be NUL-terminated UTF-8 C
+/// strings. `out` must reference `out_cap` writable bytes if non-NULL.
+#[no_mangle]
+pub unsafe extern "C" fn svpn_country_cidrs_file(
+    mmdb_path: *const c_char,
+    country: *const c_char,
+    cache_dir: *const c_char,
+    out: *mut c_char,
+    out_cap: c_int,
+) -> c_int {
+    let (Some(mmdb), Some(cc), Some(dir)) = (
+        cstr_to_str(mmdb_path),
+        cstr_to_str(country),
+        cstr_to_str(cache_dir),
+    ) else {
+        set_error("svpn_country_cidrs_file: a NULL / non-utf-8 argument".into());
+        return -1;
+    };
+
+    let path = match country::ensure_country_file(mmdb, cc, dir) {
+        Ok(p) => p,
+        Err(e) => {
+            logging::bridge_log(&format!("svpn_country_cidrs_file ERROR: {e}"));
+            set_error(e);
+            return -1;
+        }
+    };
+
+    let bytes = path.as_bytes();
+    let needed = bytes.len();
+    if !out.is_null() && out_cap > 0 {
+        let cap = out_cap as usize;
+        let copy = needed.min(cap - 1); // leave room for the NUL
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out as *mut u8, copy);
+        *out.add(copy) = 0;
+    }
+    needed as c_int
 }
 
 // ---------------------------------------------------------------------------

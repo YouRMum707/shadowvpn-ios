@@ -98,10 +98,16 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     NSString *dnsLocal  = [self stringFromConfig:cfg key:@"dns_local"  fallback:nil];
     NSString *dnsRemote = [self stringFromConfig:cfg key:@"dns_remote" fallback:nil];
     NSInteger mtu = [self integerFromConfig:cfg key:@"mtu" fallback:1400];
+    NSString *country = [self stringFromConfig:cfg key:@"country" fallback:@"CN"];
     _profileID   = [self stringFromConfig:cfg key:@"profileID"   fallback:nil];
     _profileName = [self stringFromConfig:cfg key:@"profileName" fallback:nil];
 
-    NSURL *chnrouteURL = [self resolveChnrouteURL];
+    // Derive (and cache) the bypass-CIDR file for the selected country from the
+    // bundled mmdb. The same file path feeds both the excluded routes and the
+    // chinadns decision (chnroute_path). nil ⇒ the country set is unavailable
+    // (mmdb missing or no networks for the code); split modes degrade to a full
+    // tunnel for the session and chinadns start will fail validation cleanly.
+    NSURL *chnrouteURL = [self resolveCountryCIDRURLForCountry:country];
     _configJSON = [self buildConfigJSONFromConfig:cfg
                                             mode:mode
                                      chnrouteURL:chnrouteURL];
@@ -387,22 +393,59 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
 
 // MARK: - Config helpers
 
-// Resolve the chnroute.txt the settings + core should use. Prefer the extension's
-// own bundle copy (the NE can only read its own bundle, and the app bundles a
-// copy into the PacketTunnel target's resources), then fall back to the
-// App-Group staged copy the app writes on launch.
-- (nullable NSURL *)resolveChnrouteURL {
-    NSURL *bundled = [[NSBundle mainBundle] URLForResource:@"chnroute" withExtension:@"txt"];
-    if (bundled && [[NSFileManager defaultManager] fileExistsAtPath:bundled.path]) {
-        return bundled;
+// Resolve the bypass-CIDR file for `country` (ISO alpha-2). The extension
+// bundles the MaxMind GeoLite2 Country.mmdb; the core extracts the country's
+// IPv4 networks from it and caches the resulting CIDR text to a file in the App
+// Group container (svpn_country_cidrs_file) the first time, reusing the cache on
+// later starts. Returns the cache file URL, or nil if the mmdb is missing or the
+// country has no networks (the caller logs and degrades gracefully).
+- (nullable NSURL *)resolveCountryCIDRURLForCountry:(NSString *)country {
+    NSURL *mmdb = [[NSBundle mainBundle] URLForResource:@"Country" withExtension:@"mmdb"];
+    if (!mmdb || ![[NSFileManager defaultManager] fileExistsAtPath:mmdb.path]) {
+        os_log_error(gLog, "Country.mmdb not found in extension bundle");
+        SVEngineLog(SVLogError, @"NE: Country.mmdb not found in extension bundle");
+        return nil;
     }
-    NSURL *staged = [SVAppGroup chnrouteURL];
-    if ([[NSFileManager defaultManager] fileExistsAtPath:staged.path]) {
-        return staged;
+
+    // Per-country cache lives under the shared container so it survives restarts
+    // and is reachable by the core's absolute-path reads.
+    NSURL *cacheDir = [[SVAppGroup containerURL] URLByAppendingPathComponent:@"cidr-cache"
+                                                                isDirectory:YES];
+
+    const char *mmdbC    = mmdb.path.UTF8String;
+    const char *countryC = country.UTF8String;
+    const char *cacheC   = cacheDir.path.UTF8String;
+
+    // bytes-needed / retry truncation pattern (mirrors the meow convert calls).
+    int needed = svpn_country_cidrs_file(mmdbC, countryC, cacheC, NULL, 0);
+    if (needed < 0) {
+        NSString *msg = [self lastRustError] ?: @"country CIDR extraction failed";
+        os_log_error(gLog, "svpn_country_cidrs_file(%{public}@) failed: %{public}@",
+                     country, msg);
+        SVEngineLogf(SVLogError, @"NE: country CIDR extraction for %@ failed: %@", country, msg);
+        return nil;
     }
-    os_log_error(gLog, "chnroute.txt not found in bundle or App Group container");
-    SVEngineLog(SVLogError, @"NE: chnroute.txt not found in bundle or App Group container");
-    return bundled ?: staged;  // hand the core a path anyway; it logs on read failure
+
+    char *buf = (char *)malloc((size_t)needed + 1);
+    if (!buf) { return nil; }
+    int wrote = svpn_country_cidrs_file(mmdbC, countryC, cacheC, buf, needed + 1);
+    NSURL *result = nil;
+    if (wrote >= 0) {
+        NSString *path = [NSString stringWithUTF8String:buf];
+        if (path.length > 0) {
+            result = [NSURL fileURLWithPath:path];
+            os_log_info(gLog, "country %{public}@ CIDR file: %{public}@", country, path);
+            SVEngineLogf(SVLogInfo, @"NE: country %@ bypass CIDRs ready at %@", country, path);
+        }
+    }
+    free(buf);
+    return result;
+}
+
+// Read the last error the Rust core set on this thread, or nil.
+- (nullable NSString *)lastRustError {
+    const char *p = svpn_core_last_error();
+    return (p && p[0]) ? [NSString stringWithUTF8String:p] : nil;
 }
 
 // Assemble the `config_json` string for svpn_tun_start from the providerConfig.

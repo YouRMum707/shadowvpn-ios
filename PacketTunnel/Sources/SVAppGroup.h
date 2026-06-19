@@ -5,7 +5,7 @@
 // AppGroup.swift so the ObjC NE driver and the Swift app agree byte-for-byte on
 // where the shared state/traffic JSON and the tunnel log file live. ShadowVPN's
 // container is far smaller than meow's: no Clash YAML, no effective config, no
-// REST credentials — just state, traffic, the staged chnroute copy and the log.
+// REST credentials — just state, traffic, the per-country CIDR cache and the log.
 extern NSString *const SVAppGroupIdentifier;
 
 @interface SVAppGroup : NSObject
@@ -19,9 +19,6 @@ extern NSString *const SVAppGroupIdentifier;
 @property (class, nonatomic, readonly) NSURL *trafficURL;
 /// `logs/` directory the Rust core writes its rotating log into.
 @property (class, nonatomic, readonly) NSURL *logsDirURL;
-/// `chnroute.txt` staged by the app into the container (a stable path the NE can
-/// pass as `chnroute_path` in config_json). The NE also bundles its own copy.
-@property (class, nonatomic, readonly) NSURL *chnrouteURL;
 /// Shared UserDefaults suite (selected Profile JSON, log level, on-demand flag).
 @property (class, nonatomic, readonly) NSUserDefaults *defaults;
 @end

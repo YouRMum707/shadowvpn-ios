@@ -92,6 +92,14 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     /// the UDP/IP outer headers, matching the Rust default).
     public var mtu: Int
 
+    /// ISO 3166-1 alpha-2 country code whose IP ranges **bypass** the tunnel in
+    /// ``TunnelMode/chnroute`` / ``TunnelMode/chinadns``. Derived at runtime from
+    /// the bundled MaxMind GeoLite2 Country mmdb (`svpn_country_cidrs_file`,
+    /// cached per country), so any country can be the "direct" set — not just
+    /// China. Defaults to ``defaultBypassCountry`` (`CN`). Ignored in
+    /// ``TunnelMode/full``.
+    public var bypassCountry: String
+
     public init(
         id: UUID = UUID(),
         name: String = "ShadowVPN",
@@ -103,6 +111,7 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         dnsLocal: String = Profile.defaultDNSLocal,
         dnsRemote: String = Profile.defaultDNSRemote,
         mtu: Int = Profile.defaultMTU,
+        bypassCountry: String = Profile.defaultBypassCountry,
     ) {
         self.id = id
         self.name = name
@@ -114,6 +123,27 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         self.dnsLocal = dnsLocal
         self.dnsRemote = dnsRemote
         self.mtu = mtu
+        self.bypassCountry = bypassCountry
+    }
+
+    /// Tolerant decoder: every field falls back to its default when absent, so a
+    /// profile persisted by an older build (before `bypassCountry` existed, say)
+    /// still loads instead of throwing on the missing key. Only a type mismatch
+    /// fails.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Profile()
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? d.id
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? d.name
+        server = try c.decodeIfPresent(String.self, forKey: .server) ?? d.server
+        port = try c.decodeIfPresent(Int.self, forKey: .port) ?? d.port
+        password = try c.decodeIfPresent(String.self, forKey: .password) ?? d.password
+        cipher = try c.decodeIfPresent(Cipher.self, forKey: .cipher) ?? d.cipher
+        mode = try c.decodeIfPresent(TunnelMode.self, forKey: .mode) ?? d.mode
+        dnsLocal = try c.decodeIfPresent(String.self, forKey: .dnsLocal) ?? d.dnsLocal
+        dnsRemote = try c.decodeIfPresent(String.self, forKey: .dnsRemote) ?? d.dnsRemote
+        mtu = try c.decodeIfPresent(Int.self, forKey: .mtu) ?? d.mtu
+        bypassCountry = try c.decodeIfPresent(String.self, forKey: .bypassCountry) ?? d.bypassCountry
     }
 
     // MARK: Defaults (mirror `config.rs`)
@@ -124,6 +154,8 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     public static let defaultDNSRemote = "8.8.8.8:53"
     /// Tunnel MTU default (`DEFAULT_TUN_MTU` in the Rust reference).
     public static let defaultMTU = 1400
+    /// Default bypass country: China (the classic chnroute split-tunnel).
+    public static let defaultBypassCountry = "CN"
 
     /// `server:port` as the NE expects it (and as `config_json["server"]`).
     public var serverAddress: String {

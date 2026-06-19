@@ -88,6 +88,33 @@ void svpn_core_set_home_dir(const char *dir);
 const char *svpn_core_last_error(void);
 
 /**
+ * Resolve the bypass-CIDR file for an ISO country code, extracting it from the
+ * bundled MaxMind GeoLite2 Country mmdb the first time and caching it.
+ *
+ * Writes the absolute path of the cache file (`<cache_dir>/chnroute-<COUNTRY>-
+ * <mmdb_len>.txt`, plain `a.b.c.d/len`-per-line text) into `out`/`out_cap`,
+ * NUL-terminated. Returns the number of bytes the path needs (excluding the
+ * NUL); if the return value is `>= out_cap` the path was truncated — allocate
+ * `ret + 1` and call again. Returns `-1` on error (inspect
+ * `svpn_core_last_error`): a missing/invalid mmdb, an unknown country, or an
+ * unwritable cache directory.
+ *
+ * The expensive mmdb walk runs at most once per `(country, mmdb)`; later calls
+ * return the cached path immediately. Swift parses the returned file for
+ * `NEPacketTunnelNetworkSettings.excludedRoutes` and passes the same path back
+ * as `config_json["chnroute_path"]` for the chinadns decision.
+ *
+ * # Safety
+ * `mmdb_path`, `country`, and `cache_dir` must each be NUL-terminated UTF-8 C
+ * strings. `out` must reference `out_cap` writable bytes if non-NULL.
+ */
+int svpn_country_cidrs_file(const char *mmdb_path,
+                            const char *country,
+                            const char *cache_dir,
+                            char *out,
+                            int out_cap);
+
+/**
  * Start the ShadowVPN data plane with a Swift-owned egress callback and a JSON
  * config (see [`config::RuntimeConfig`] for the schema). The ingest side is
  * driven by `svpn_tun_ingest`; an internal mpsc queue means there's no file

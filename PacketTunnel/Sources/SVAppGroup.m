@@ -28,10 +28,6 @@ NSString *const SVAppGroupIdentifier = @"group.com.tangzixiang.shadowvpn";
     return [[self containerURL] URLByAppendingPathComponent:@"logs" isDirectory:YES];
 }
 
-+ (NSURL *)chnrouteURL {
-    return [[self containerURL] URLByAppendingPathComponent:@"chnroute.txt"];
-}
-
 + (NSUserDefaults *)defaults {
     NSUserDefaults *d = [[NSUserDefaults alloc] initWithSuiteName:SVAppGroupIdentifier];
     NSAssert(d, @"Shared UserDefaults unavailable for suite '%@'", SVAppGroupIdentifier);

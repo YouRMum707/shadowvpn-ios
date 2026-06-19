@@ -40,11 +40,12 @@ public enum AppGroup {
             .appending(path: "svpn-tunnel.log")
     }
 
-    /// Staged copy of `chnroute.txt` the app writes into the container on launch
-    /// so the extension can read it from a stable path (passed as
-    /// `chnroute_path` in `config_json`). Mirrors meow's GeoAssetStager.
-    public static var chnrouteURL: URL {
-        containerURL.appending(path: "chnroute.txt")
+    /// Directory where the extension caches each country's extracted bypass-CIDR
+    /// file (`chnroute-<COUNTRY>-<mmdbLen>.txt`), written by the core's
+    /// `svpn_country_cidrs_file` on first use and reused thereafter. Excluded
+    /// from backup — it's a regenerable derivative of the bundled mmdb.
+    public static var cidrCacheURL: URL {
+        containerURL.appending(path: "cidr-cache")
     }
 
     /// UserDefaults suite shared between app and extension. Force-unwrap is safe
@@ -59,12 +60,12 @@ public enum AppGroup {
 
     /// Mark the persistent profile store as backup-eligible and exclude the
     /// transient files that are regenerated on every tunnel start (state,
-    /// traffic, the staged chnroute copy and the diagnostic log ring).
+    /// traffic, the per-country CIDR cache and the diagnostic log ring).
     public static func configureBackup() {
         setBackupExclusion(containerURL, excluded: false)
         setBackupExclusion(stateURL, excluded: true)
         setBackupExclusion(trafficURL, excluded: true)
-        setBackupExclusion(chnrouteURL, excluded: true)
+        setBackupExclusion(cidrCacheURL, excluded: true)
         setBackupExclusion(tunnelLogURL, excluded: true)
         setBackupExclusion(tunnelLogURL.appendingPathExtension("1"), excluded: true)
     }
