@@ -1,5 +1,17 @@
 # ShadowVPN iOS — implementation blueprint
 
+> **Implemented.** The split-tunnel bypass set is selected **at runtime by
+> country** (Settings → Bypass Country), derived from the bundled MaxMind
+> GeoLite2 `Country.mmdb` by the FFI `svpn_country_cidrs_file(mmdb, country,
+> cache_dir)` and **cached per country** to
+> `<AppGroup>/cidr-cache/chnroute-<COUNTRY>-<mmdbLen>.txt` (the mmdb walk runs at
+> most once per country). The static build-time `chnroute.txt` and the app-side
+> `ChnrouteStager` described below were the first cut and have been removed; the
+> `core/rust/chnroute-gen` tool remains as an offline utility. References to
+> "chnroute" / `chnroute_path` in the code are now the **selected country's**
+> CIDR file, not specifically China.
+
+
 A native iOS client for **ShadowVPN** (a UDP, pre-shared-key, layer-3 tunnel using
 the shadowsocks AEAD UDP wire scheme). It mirrors the project structure, build and
 signing setup of the sibling project `../meow-ios`, but the data plane is far

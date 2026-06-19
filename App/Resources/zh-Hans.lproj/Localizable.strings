@@ -1,0 +1,77 @@
+/* ShadowVPN — 简体中文本地化 */
+
+/* Tabs */
+"tabs.home" = "主页";
+"tabs.logs" = "日志";
+"tabs.settings" = "设置";
+
+/* Home */
+"home.nav.title" = "ShadowVPN";
+"home.toggle.vpn" = "VPN";
+"home.toggle.connect" = "连接";
+"home.toggle.connecting" = "正在连接…";
+"home.toggle.disconnect" = "断开";
+"home.badge.state" = "状态";
+"home.badge.connected" = "已连接";
+"home.badge.connecting" = "连接中";
+"home.badge.disconnected" = "未连接";
+"home.uptime" = "已连接";
+"home.profile.name" = "配置";
+"home.profile.none" = "无配置";
+"home.summary.server" = "服务器";
+"home.summary.noServer" = "未配置服务器";
+"home.summary.mode" = "模式";
+"home.summary.cipher" = "加密";
+"home.traffic.upload" = "上传";
+"home.traffic.download" = "下载";
+"home.traffic.total %@" = "共 %@";
+"home.error.banner" = "连接错误";
+"home.error.dismiss" = "知道了";
+"home.error.tunnelFailed.title" = "隧道启动失败";
+
+/* Settings */
+"settings.nav.title" = "设置";
+"settings.save" = "保存";
+"settings.saved" = "已保存";
+
+"settings.section.server" = "服务器";
+"settings.field.name" = "名称";
+"settings.field.server" = "地址";
+"settings.field.port" = "端口";
+
+"settings.section.security" = "加密";
+"settings.field.password" = "密码";
+"settings.field.password.placeholder" = "预共享密钥";
+"settings.field.cipher" = "加密方式";
+
+"settings.section.routing" = "路由";
+"settings.field.mode" = "模式";
+"settings.mode.full.footer" = "所有流量都经过隧道。";
+"settings.mode.chnroute.footer" = "所选国家/地区 IP 段的流量绕过隧道直连，其余流量走隧道。";
+"settings.mode.chinadns.footer" = "在“国家路由”基础上增加分流 DNS：按查询结果选择国内或干净的解析结果。";
+
+"settings.section.country" = "绕行国家/地区";
+"settings.field.country" = "国家/地区";
+"settings.section.country.footer" = "分配给该国家/地区的 IP 段将绕过隧道。该集合首次使用时从内置 GeoIP 数据库生成并缓存。";
+
+"settings.section.dns" = "ChinaDNS 上游";
+"settings.field.dnsLocal" = "国内 DNS";
+"settings.field.dnsRemote" = "干净 DNS";
+"settings.section.dns.footer" = "国内解析器直接查询；干净解析器经隧道查询。最终结果按国家/地区 IP 集合选择。";
+
+"settings.section.general" = "通用";
+"settings.toggle.onDemand" = "按需连接";
+"settings.field.mtu" = "MTU";
+
+"settings.section.about" = "关于";
+"settings.about.version" = "版本";
+"settings.about.memory" = "扩展内存";
+
+/* Logs */
+"logs.nav.title" = "日志";
+"logs.action.share" = "分享";
+"logs.action.clear" = "清除";
+"logs.bottom" = "底部";
+"logs.empty" = "暂无日志";
+"logs.empty.title" = "暂无日志";
+"logs.empty.subtitle" = "连接隧道后开始收集日志。";

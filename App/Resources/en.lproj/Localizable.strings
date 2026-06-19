@@ -1,0 +1,77 @@
+/* ShadowVPN — English localization */
+
+/* Tabs */
+"tabs.home" = "Home";
+"tabs.logs" = "Logs";
+"tabs.settings" = "Settings";
+
+/* Home */
+"home.nav.title" = "ShadowVPN";
+"home.toggle.vpn" = "VPN";
+"home.toggle.connect" = "Connect";
+"home.toggle.connecting" = "Connecting…";
+"home.toggle.disconnect" = "Disconnect";
+"home.badge.state" = "Status";
+"home.badge.connected" = "Connected";
+"home.badge.connecting" = "Connecting";
+"home.badge.disconnected" = "Disconnected";
+"home.uptime" = "Connected for";
+"home.profile.name" = "Profile";
+"home.profile.none" = "No profile";
+"home.summary.server" = "Server";
+"home.summary.noServer" = "No server configured";
+"home.summary.mode" = "Mode";
+"home.summary.cipher" = "Cipher";
+"home.traffic.upload" = "Upload";
+"home.traffic.download" = "Download";
+"home.traffic.total %@" = "%@ total";
+"home.error.banner" = "Connection error";
+"home.error.dismiss" = "Dismiss";
+"home.error.tunnelFailed.title" = "Tunnel failed to start";
+
+/* Settings */
+"settings.nav.title" = "Settings";
+"settings.save" = "Save";
+"settings.saved" = "Saved";
+
+"settings.section.server" = "Server";
+"settings.field.name" = "Name";
+"settings.field.server" = "Address";
+"settings.field.port" = "Port";
+
+"settings.section.security" = "Security";
+"settings.field.password" = "Password";
+"settings.field.password.placeholder" = "Pre-shared key";
+"settings.field.cipher" = "Cipher";
+
+"settings.section.routing" = "Routing";
+"settings.field.mode" = "Mode";
+"settings.mode.full.footer" = "All traffic goes through the tunnel.";
+"settings.mode.chnroute.footer" = "Traffic to the selected country's IP ranges bypasses the tunnel and goes direct; everything else is tunneled.";
+"settings.mode.chinadns.footer" = "Like China Route, plus a split DNS resolver that picks a domestic or a clean answer per query.";
+
+"settings.section.country" = "Bypass Country";
+"settings.field.country" = "Country";
+"settings.section.country.footer" = "IP ranges allocated to this country bypass the tunnel. The set is derived from a bundled GeoIP database on first use and cached.";
+
+"settings.section.dns" = "ChinaDNS Upstreams";
+"settings.field.dnsLocal" = "Domestic DNS";
+"settings.field.dnsRemote" = "Clean DNS";
+"settings.section.dns.footer" = "The domestic resolver is queried directly; the clean resolver is reached through the tunnel. The answer is chosen by the country IP set.";
+
+"settings.section.general" = "General";
+"settings.toggle.onDemand" = "Connect on Demand";
+"settings.field.mtu" = "MTU";
+
+"settings.section.about" = "About";
+"settings.about.version" = "Version";
+"settings.about.memory" = "Extension Memory";
+
+/* Logs */
+"logs.nav.title" = "Logs";
+"logs.action.share" = "Share";
+"logs.action.clear" = "Clear";
+"logs.bottom" = "Bottom";
+"logs.empty" = "No logs yet";
+"logs.empty.title" = "No logs yet";
+"logs.empty.subtitle" = "Connect the tunnel to start collecting logs.";
