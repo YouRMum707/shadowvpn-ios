@@ -2,6 +2,7 @@
 
 /* Tabs */
 "tabs.home" = "Home";
+"tabs.profiles" = "Profiles";
 "tabs.logs" = "Logs";
 "tabs.settings" = "Settings";
 
@@ -29,6 +30,24 @@
 "home.error.dismiss" = "Dismiss";
 "home.error.tunnelFailed.title" = "Tunnel failed to start";
 
+/* Profiles */
+"profiles.nav.title" = "Profiles";
+"profiles.add" = "Add Profile";
+"profiles.edit" = "Edit";
+"profiles.delete" = "Delete";
+"profiles.section.footer" = "Tap a profile to make it active — Home connects with it. Tap the controls icon to edit, or swipe to delete.";
+"profiles.row.active" = "Active";
+"profiles.row.noServer" = "No server configured";
+"profiles.new.defaultName" = "New Profile";
+
+/* Profile editor */
+"editor.nav.title" = "Edit Profile";
+"editor.cancel" = "Cancel";
+"editor.save" = "Save";
+"editor.section.obfuscation" = "Obfuscation";
+"editor.field.obfuscation" = "Disguise as";
+"editor.section.obfuscation.footer" = "Disguises the UDP packets on the wire to evade traffic classification — the server must use the same setting. HTTP/3 (QUIC) keeps them binary; Base64 makes them printable text but ~33% larger, so set MTU to about 1000 for that mode.";
+
 /* Settings */
 "settings.nav.title" = "Settings";
 "settings.save" = "Save";
@@ -47,8 +66,7 @@
 "settings.section.routing" = "Routing";
 "settings.field.mode" = "Mode";
 "settings.mode.full.footer" = "All traffic goes through the tunnel.";
-"settings.mode.chnroute.footer" = "Traffic to the selected country's IP ranges bypasses the tunnel and goes direct; everything else is tunneled.";
-"settings.mode.chinadns.footer" = "Like China Route, plus a split DNS resolver that picks a domestic or a clean answer per query.";
+"settings.mode.chinadns.footer" = "Traffic to the selected country's IP ranges bypasses the tunnel and goes direct; everything else is tunneled. A split DNS resolver also picks a domestic or a clean answer per query.";
 
 "settings.section.country" = "Bypass Country";
 "settings.field.country" = "Country";
@@ -60,8 +78,13 @@
 "settings.section.dns.footer" = "The domestic resolver is queried directly; the clean resolver is reached through the tunnel. The answer is chosen by the country IP set.";
 
 "settings.section.general" = "General";
+"settings.section.general.footer" = "When enabled, iOS reconnects the active profile automatically as soon as network traffic needs it.";
 "settings.toggle.onDemand" = "Connect on Demand";
+
+"settings.section.advanced" = "Advanced";
 "settings.field.mtu" = "MTU";
+"settings.field.peerIP" = "Peer IP";
+"settings.field.peerIP.footer" = "The tunnel's inner client address. Must match the server's peer_ip (default 10.9.0.2) so the server can route replies back to you.";
 
 "settings.section.about" = "About";
 "settings.about.version" = "Version";

@@ -35,9 +35,19 @@ struct ProfileTests {
     }
 
     @Test
+    func `a profile saved with the removed chnroute mode migrates to full`() throws {
+        // The `chnroute` mode was removed; a profile persisted by an older build
+        // must still decode (falling back to the default) rather than throw.
+        let json = #"{"id":"00000000-0000-0000-0000-000000000000","server":"h","port":8388,"password":"p","mode":"chnroute"}"#
+        let decoded = try JSONDecoder().decode(Profile.self, from: Data(json.utf8))
+        #expect(decoded.mode == .full)
+        #expect(decoded.server == "h")
+        #expect(decoded.password == "p")
+    }
+
+    @Test
     func `mode raw values match the policy names`() {
         #expect(TunnelMode.full.rawValue == "full")
-        #expect(TunnelMode.chnroute.rawValue == "chnroute")
         #expect(TunnelMode.chinadns.rawValue == "chinadns")
     }
 
@@ -76,7 +86,7 @@ struct ProfileTests {
 
     @Test
     func `config_json string is valid sorted-key JSON`() throws {
-        let profile = Profile(server: "h", port: 53, password: "p", mode: .chnroute)
+        let profile = Profile(server: "h", port: 53, password: "p", mode: .chinadns)
         let json = try profile.configJSONString(chnroutePath: "/abs/chnroute.txt")
 
         // Re-parse to confirm it's well-formed and the values survived.

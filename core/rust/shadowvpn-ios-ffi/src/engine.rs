@@ -46,9 +46,10 @@ use parking_lot::Mutex;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
-use crate::config::{Mode, RuntimeConfig};
+use crate::config::{Mode, Obfs, RuntimeConfig};
 use crate::dns_intercept::{self, DnsInterceptor};
 use crate::logging;
+use crate::obfs::{self, Obfuscator, QuicObfs};
 use crate::vendor::crypto::{decrypt_packet, encrypt_packet};
 use crate::vendor::protocol::max_datagram_size;
 
@@ -208,10 +209,38 @@ pub fn start(ctx: *mut c_void, cb: WritePacketFn, config_json: &str) -> Result<(
     let cipher = cfg.cipher;
     let master_key: Arc<[u8]> = Arc::from(cfg.master_key.clone().into_boxed_slice());
 
+    // Carrier obfuscation. When enabled, every datagram is wrapped to look like
+    // a QUIC short-header packet on the wire (and unwrapped on egress). `None`
+    // is the plain `salt ++ AEAD` envelope. The peer must apply the inverse.
+    let obfuscator: Option<Arc<Obfuscator>> = match cfg.obfs {
+        Obfs::Quic => {
+            logging::bridge_log("svpn obfs: QUIC/HTTP3 datagram shaping active");
+            Some(Arc::new(Obfuscator::Quic(QuicObfs::new(
+                obfs::DEFAULT_DCID_LEN,
+            ))))
+        }
+        Obfs::Base64 => {
+            logging::bridge_log("svpn obfs: base64 plain-text shaping active");
+            Some(Arc::new(Obfuscator::Base64))
+        }
+        Obfs::None => None,
+    };
+
     // chinadns interceptor — only built in chinadns mode. In every other mode
     // it is `None` and the ingress path is the plain encrypt-and-forward loop.
     let interceptor: Option<Arc<DnsInterceptor>> = if cfg.mode == Mode::Chinadns {
-        match dns_intercept::DnsInterceptor::new(&cfg, socket.clone(), cipher, master_key.clone()) {
+        // `DnsInterceptor::new` binds a tokio `UdpSocket` (via `from_std`), which
+        // panics unless it runs inside a Tokio runtime context. start() runs on
+        // the NE control thread (outside the runtime), so enter it for the build.
+        // Scoped to this branch so it can't collide with any later `block_on`.
+        let _enter = rt.enter();
+        match dns_intercept::DnsInterceptor::new(
+            &cfg,
+            socket.clone(),
+            cipher,
+            master_key.clone(),
+            obfuscator.clone(),
+        ) {
             Ok(i) => {
                 logging::bridge_log("svpn chinadns interceptor active");
                 Some(Arc::new(i))
@@ -232,16 +261,17 @@ pub fn start(ctx: *mut c_void, cb: WritePacketFn, config_json: &str) -> Result<(
 
     let (ingest_tx, ingest_rx) = mpsc::channel::<Vec<u8>>(INGEST_QUEUE_DEPTH);
 
-    // --- egress task: recv -> decrypt -> Swift callback --------------------
+    // --- egress task: recv -> (de-obfuscate) -> decrypt -> Swift callback --
     let egress = rt.spawn(egress_loop(
         socket.clone(),
         cipher,
         master_key.clone(),
         writer,
         interceptor.clone(),
+        obfuscator.clone(),
     ));
 
-    // --- ingress task: ingest mpsc -> encrypt -> send ----------------------
+    // --- ingress task: ingest mpsc -> encrypt -> (obfuscate) -> send -------
     let ingress = rt.spawn(ingress_loop(
         ingest_rx,
         socket.clone(),
@@ -249,10 +279,11 @@ pub fn start(ctx: *mut c_void, cb: WritePacketFn, config_json: &str) -> Result<(
         master_key.clone(),
         writer,
         interceptor,
+        obfuscator.clone(),
     ));
 
     // --- keepalive task: 25 s 1-byte 0x00 ----------------------------------
-    let keepalive = rt.spawn(keepalive_loop(socket, cipher, master_key));
+    let keepalive = rt.spawn(keepalive_loop(socket, cipher, master_key, obfuscator));
 
     *session_slot().lock() = Some(Session {
         ingest_tx,
@@ -372,8 +403,15 @@ async fn ingress_loop(
     master_key: Arc<[u8]>,
     writer: WriteCtx,
     interceptor: Option<Arc<DnsInterceptor>>,
+    obfuscator: Option<Arc<Obfuscator>>,
 ) {
     while let Some(pkt) = rx.recv().await {
+        // Surface the flow's destination (DNS name / TLS SNI / HTTP Host) in the
+        // app's Log view. Passive and best-effort; never affects forwarding.
+        if let Some(info) = crate::inspect::describe(&pkt) {
+            log::info!("flow → {info}");
+        }
+
         // chinadns mode: an A/IN query to dst port 53 is handled out-of-band by
         // the interceptor (direct + tunneled split) and must NOT be forwarded
         // as-is. `try_intercept` returns true if it took ownership of the packet.
@@ -394,7 +432,12 @@ async fn ingress_loop(
                 continue;
             }
         };
-        match socket.send(&datagram).await {
+        // Shape the datagram to look like a QUIC packet when obfuscation is on.
+        let wire = match obfuscator {
+            Some(ref o) => o.wrap(&datagram),
+            None => datagram,
+        };
+        match socket.send(&wire).await {
             Ok(_) => {
                 UP_BYTES.fetch_add(pkt.len() as i64, Ordering::Relaxed);
             }
@@ -416,8 +459,10 @@ async fn egress_loop(
     master_key: Arc<[u8]>,
     writer: WriteCtx,
     interceptor: Option<Arc<DnsInterceptor>>,
+    obfuscator: Option<Arc<Obfuscator>>,
 ) {
-    let mut buf = vec![0u8; max_datagram_size(cipher)];
+    // Headroom for the obfs prefix on top of the largest crypto datagram.
+    let mut buf = vec![0u8; max_datagram_size(cipher) + obfs::MAX_HEADER];
     loop {
         let n = match socket.recv(&mut buf).await {
             Ok(n) => n,
@@ -427,7 +472,26 @@ async fn egress_loop(
             }
         };
 
-        let plaintext = match decrypt_packet(cipher, &master_key, &buf[..n]) {
+        // De-obfuscate when enabled; a packet that doesn't match the configured
+        // obfuscation is noise/probe traffic — drop it rather than feed garbage to
+        // the AEAD. `decoded` owns the de-obfuscated bytes for variants (base64)
+        // that can't borrow from `buf`.
+        let decoded;
+        let datagram: &[u8] = match obfuscator {
+            Some(ref o) => match o.unwrap(&buf[..n]) {
+                Some(inner) => {
+                    decoded = inner;
+                    &decoded
+                }
+                None => {
+                    log::debug!("svpn egress: dropping non-obfs {n}-byte datagram");
+                    continue;
+                }
+            },
+            None => &buf[..n],
+        };
+
+        let plaintext = match decrypt_packet(cipher, &master_key, datagram) {
             Ok(p) => p,
             Err(e) => {
                 // Forged/corrupt/keepalive-echo datagrams are normal on an open
@@ -465,6 +529,7 @@ async fn keepalive_loop(
     socket: Arc<UdpSocket>,
     cipher: crate::vendor::crypto::Cipher,
     master_key: Arc<[u8]>,
+    obfuscator: Option<Arc<Obfuscator>>,
 ) {
     let mut ticker = tokio::time::interval(KEEPALIVE_INTERVAL);
     // Don't fire a burst if we ever fall behind (e.g. after device sleep).
@@ -477,6 +542,11 @@ async fn keepalive_loop(
                 log::warn!("svpn keepalive: encrypt failed, skipping: {e}");
                 continue;
             }
+        };
+        // Keepalives ride the same obfs framing so the whole flow is uniform.
+        let datagram = match obfuscator {
+            Some(ref o) => o.wrap(&datagram),
+            None => datagram,
         };
         if let Err(e) = socket.send(&datagram).await {
             log::warn!("svpn keepalive: send failed, ending keepalive: {e}");

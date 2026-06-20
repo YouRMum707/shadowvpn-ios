@@ -91,12 +91,16 @@ fn build_country_cidrs(mmdb_path: &str, code: &str) -> Result<String, String> {
         .map_err(|e| format!("iterate mmdb networks: {e}"))?
     {
         let item = item.map_err(|e| format!("decode mmdb network: {e}"))?;
-        let net = match item.network().map_err(|e| format!("read mmdb network: {e}"))? {
+        let net = match item
+            .network()
+            .map_err(|e| format!("read mmdb network: {e}"))?
+        {
             IpNetwork::V4(v4) => v4,
             IpNetwork::V6(_) => continue,
         };
-        let record: Option<geoip2::Country> =
-            item.decode().map_err(|e| format!("decode mmdb country: {e}"))?;
+        let record: Option<geoip2::Country> = item
+            .decode()
+            .map_err(|e| format!("decode mmdb country: {e}"))?;
         let matches = record
             .and_then(|r| r.country.iso_code)
             .is_some_and(|iso| iso.eq_ignore_ascii_case(code));
@@ -194,7 +198,10 @@ mod tests {
     #[test]
     fn adjacent_blocks_merge_into_minimal_cidrs() {
         // 1.0.1.0 – 1.0.3.255 == 1.0.1.0/24 + 1.0.2.0/23
-        assert_eq!(cidrs("1.0.1.0", "1.0.3.255"), vec!["1.0.1.0/24", "1.0.2.0/23"]);
+        assert_eq!(
+            cidrs("1.0.1.0", "1.0.3.255"),
+            vec!["1.0.1.0/24", "1.0.2.0/23"]
+        );
     }
 
     #[test]

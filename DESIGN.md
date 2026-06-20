@@ -221,3 +221,49 @@ or read from the extension bundle directly — pick one and be consistent.
 - Swift 6 strict concurrency; keep `@MainActor` where meow does.
 - Match the surrounding code’s comment density and idiom. swiftlint/swiftformat
   configs copied from meow.
+
+---
+
+## QUIC / HTTP3 carrier obfuscation (`obfs`)
+
+Optional traffic shaping that makes each UDP datagram look like a QUIC 1-RTT
+(HTTP/3) short-header packet, to evade naive UDP/protocol classification. It is
+**cosmetic framing only** — no added security — and is applied *outside* the
+shadowsocks AEAD envelope. Selected per profile via `config_json["obfs"]`
+(`"none"` default, or `"quic"`). **Both ends must agree**; the server applies the
+exact inverse (`shadowvpn-server` reads `"obfs": "quic"` in `server.json`).
+
+Implemented in `core/rust/shadowvpn-ios-ffi/src/obfs.rs` (client) and
+`docs/shadowvpn-upstream-ref/src/obfs.rs` (server) — keep the two byte-compatible.
+
+### Wire format
+
+Every datagram (the `salt ++ AEAD(ciphertext ++ tag)` envelope, including
+keepalives and the chinadns clean query) is prefixed with:
+
+```text
+[ first byte (1) ] [ DCID (8) ] [ packet number (PN_LEN) ] [ payload … ]
+  0b01RR_SPKK         opaque        big-endian counter         salt ++ AEAD
+```
+
+* **first byte** — header-form bit `0x80` CLEAR and fixed bit `0x40` SET (QUIC
+  short header). The low two bits hold `PN_LEN - 1` (QUIC packet-number-length
+  field); the remaining bits are randomized (header-protected ⇒ random in real
+  QUIC). This implementation emits `PN_LEN = 2`.
+* **DCID** — `DEFAULT_DCID_LEN = 8` opaque bytes, generated once per session and
+  reused (a real QUIC connection keeps a constant DCID). Both directions wrap
+  with their own DCID; the value is never read on decode.
+* **packet number** — a `PN_LEN`-byte big-endian counter (cosmetic).
+
+### Decode (self-describing given the fixed 8-byte DCID)
+
+```text
+first  = pkt[0]
+require: (first & 0x80) == 0  &&  (first & 0x40) != 0     # else drop (not obfs)
+pn_len = (first & 0x03) + 1
+payload = pkt[1 + 8 + pn_len ..]                          # then AEAD-decrypt
+```
+
+A packet whose first byte isn't a short header is dropped before the AEAD, so a
+mismatched (non-obfs) peer simply gets no traffic — `obfs` must match on both
+ends. Pairs naturally with **UDP/443**, where real HTTP/3 lives.

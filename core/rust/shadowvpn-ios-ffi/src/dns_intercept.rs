@@ -39,6 +39,7 @@ use tokio::net::UdpSocket;
 
 use crate::config::RuntimeConfig;
 use crate::engine::WriteCtx;
+use crate::obfs::Obfuscator;
 use crate::vendor::crypto::{encrypt_packet, Cipher};
 use crate::vendor::dns::{a_records, question};
 use crate::vendor::policy::chnroute::ChnRoute;
@@ -102,6 +103,9 @@ pub struct DnsInterceptor {
     /// Cipher + key for encrypting the tunneled clean query.
     cipher: Cipher,
     master_key: Arc<[u8]>,
+    /// Carrier obfuscation, matching the engine's. The tunneled clean query is
+    /// sent on the same connected socket, so it must be wrapped identically.
+    obfuscator: Option<Arc<Obfuscator>>,
     /// In-flight tunneled queries keyed by DNS transaction id.
     pending: Mutex<HashMap<u16, Pending>>,
 }
@@ -116,6 +120,7 @@ impl DnsInterceptor {
         tunnel: Arc<UdpSocket>,
         cipher: Cipher,
         master_key: Arc<[u8]>,
+        obfuscator: Option<Arc<Obfuscator>>,
     ) -> Result<Self, String> {
         let path = cfg
             .chnroute_path
@@ -149,6 +154,7 @@ impl DnsInterceptor {
             tunnel,
             cipher,
             master_key,
+            obfuscator,
             pending: Mutex::new(HashMap::new()),
         })
     }
@@ -301,6 +307,12 @@ impl DnsInterceptor {
                 self.pending.lock().remove(&txid);
                 return;
             }
+        };
+        // Wrap in the same obfs framing the engine uses, so the clean query is
+        // indistinguishable from the rest of the carrier traffic.
+        let datagram = match self.obfuscator {
+            Some(ref o) => o.wrap(&datagram),
+            None => datagram,
         };
         // try_send-style: spawn the send so we don't block the ingress task.
         let tunnel = self.tunnel.clone();

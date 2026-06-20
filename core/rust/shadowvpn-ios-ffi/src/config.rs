@@ -51,6 +51,20 @@ pub enum Mode {
     Chinadns,
 }
 
+/// Carrier obfuscation applied to each UDP datagram on the wire (see
+/// [`crate::obfs`]). Both ends must agree; the server applies the inverse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Obfs {
+    /// No obfuscation — the datagram is the bare `salt ++ AEAD` envelope.
+    #[default]
+    None,
+    /// Wrap each datagram to look like a QUIC 1-RTT (HTTP/3) short-header packet.
+    Quic,
+    /// Base64-encode each datagram so the UDP payload is printable ASCII text.
+    Base64,
+}
+
 /// Raw, as-deserialized config. Kept private; callers get the validated
 /// [`RuntimeConfig`] from [`RuntimeConfig::from_json`].
 #[derive(Debug, Deserialize)]
@@ -80,6 +94,9 @@ struct RawConfig {
     /// Absolute path to the bundled/staged `chnroute.txt` for chinadns mode.
     #[serde(default)]
     chnroute_path: Option<String>,
+    /// Carrier obfuscation. Defaults to [`Obfs::None`].
+    #[serde(default)]
+    obfs: Obfs,
 }
 
 /// Validated, hot-path-ready runtime configuration.
@@ -102,6 +119,8 @@ pub struct RuntimeConfig {
     pub dns_remote: Option<String>,
     /// Path to `chnroute.txt` (chinadns mode).
     pub chnroute_path: Option<String>,
+    /// Carrier obfuscation applied to every datagram.
+    pub obfs: Obfs,
 }
 
 impl RuntimeConfig {
@@ -150,6 +169,7 @@ impl RuntimeConfig {
             dns_local: raw.dns_local,
             dns_remote: raw.dns_remote,
             chnroute_path: raw.chnroute_path,
+            obfs: raw.obfs,
         })
     }
 }

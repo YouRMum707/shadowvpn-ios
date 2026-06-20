@@ -26,6 +26,10 @@ final class EditableProfile {
     var bypassCountry: String
     /// String-backed MTU; coerced to `Int` in ``makeProfile()``.
     var mtuText: String
+    /// Carrier obfuscation applied to every datagram on the wire.
+    var obfuscation: Obfuscation
+    /// Tunnel inner client IP (must match the server's `peer_ip`).
+    var peerIP: String
 
     /// Seed the form from an existing ``Profile``.
     init(_ profile: Profile) {
@@ -40,6 +44,8 @@ final class EditableProfile {
         dnsRemote = profile.dnsRemote
         bypassCountry = profile.bypassCountry
         mtuText = String(profile.mtu)
+        obfuscation = profile.obfuscation
+        peerIP = profile.peerIP
     }
 
     /// Parsed port, or the wire default when the field is blank/garbage. Never
@@ -87,6 +93,10 @@ final class EditableProfile {
             dnsRemote: dnsRemote.trimmingCharacters(in: .whitespaces),
             mtu: mtu,
             bypassCountry: bypassCountry.trimmingCharacters(in: .whitespaces).uppercased(),
+            obfuscation: obfuscation,
+            peerIP: peerIP.trimmingCharacters(in: .whitespaces).isEmpty
+                ? Profile.defaultPeerIP
+                : peerIP.trimmingCharacters(in: .whitespaces),
         )
     }
 

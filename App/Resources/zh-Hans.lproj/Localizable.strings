@@ -2,6 +2,7 @@
 
 /* Tabs */
 "tabs.home" = "主页";
+"tabs.profiles" = "配置";
 "tabs.logs" = "日志";
 "tabs.settings" = "设置";
 
@@ -29,6 +30,24 @@
 "home.error.dismiss" = "知道了";
 "home.error.tunnelFailed.title" = "隧道启动失败";
 
+/* Profiles */
+"profiles.nav.title" = "配置";
+"profiles.add" = "添加配置";
+"profiles.edit" = "编辑";
+"profiles.delete" = "删除";
+"profiles.section.footer" = "点按配置即可设为当前使用，主页将用它连接。点按右侧控件图标可编辑，左滑可删除。";
+"profiles.row.active" = "使用中";
+"profiles.row.noServer" = "未配置服务器";
+"profiles.new.defaultName" = "新配置";
+
+/* Profile editor */
+"editor.nav.title" = "编辑配置";
+"editor.cancel" = "取消";
+"editor.save" = "保存";
+"editor.section.obfuscation" = "混淆";
+"editor.field.obfuscation" = "伪装为";
+"editor.section.obfuscation.footer" = "在链路上伪装 UDP 数据包以规避流量识别，服务器必须使用相同设置。HTTP/3 (QUIC) 保持二进制；Base64 会变成可见文本但体积增加约 33%，该模式请将 MTU 设为约 1000。";
+
 /* Settings */
 "settings.nav.title" = "设置";
 "settings.save" = "保存";
@@ -47,8 +66,7 @@
 "settings.section.routing" = "路由";
 "settings.field.mode" = "模式";
 "settings.mode.full.footer" = "所有流量都经过隧道。";
-"settings.mode.chnroute.footer" = "所选国家/地区 IP 段的流量绕过隧道直连，其余流量走隧道。";
-"settings.mode.chinadns.footer" = "在“国家路由”基础上增加分流 DNS：按查询结果选择国内或干净的解析结果。";
+"settings.mode.chinadns.footer" = "所选国家/地区 IP 段的流量绕过隧道直连，其余流量走隧道；并启用分流 DNS，按查询结果选择国内或干净的解析结果。";
 
 "settings.section.country" = "绕行国家/地区";
 "settings.field.country" = "国家/地区";
@@ -60,8 +78,13 @@
 "settings.section.dns.footer" = "国内解析器直接查询；干净解析器经隧道查询。最终结果按国家/地区 IP 集合选择。";
 
 "settings.section.general" = "通用";
+"settings.section.general.footer" = "开启后，当有网络流量需要时，iOS 会自动用当前配置重新连接。";
 "settings.toggle.onDemand" = "按需连接";
+
+"settings.section.advanced" = "高级";
 "settings.field.mtu" = "MTU";
+"settings.field.peerIP" = "对端 IP";
+"settings.field.peerIP.footer" = "隧道内的客户端地址，必须与服务器的 peer_ip 一致（默认 10.9.0.2），服务器才能把回包路由给你。";
 
 "settings.section.about" = "关于";
 "settings.about.version" = "版本";

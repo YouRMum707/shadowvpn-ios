@@ -6,8 +6,13 @@ import Foundation
 /// UserDefaults suite. The active ``Profile`` is persisted separately as JSON;
 /// these are the lighter app-wide toggles plus the selected-profile pointer.
 public enum PreferenceKey {
-    /// JSON-encoded ``Profile`` currently selected/edited in the app.
+    /// JSON-encoded **active** ``Profile`` — the one the extension reads at start
+    /// time to build its `config_json`. Kept in lock-step with the selected entry
+    /// of ``profileList`` so the NE side needs no multi-profile awareness.
     public static let profile = "com.tangzixiang.shadowvpn.profile"
+    /// JSON-encoded array of every saved ``Profile`` the user manages in the
+    /// Profiles tab.
+    public static let profileList = "com.tangzixiang.shadowvpn.profileList"
     /// Identifier of the selected ``Profile`` (mirrors `Profile.id`).
     public static let selectedProfileID = "com.tangzixiang.shadowvpn.selectedProfileID"
     /// Core log verbosity passed to `svpn_core_log` (0=err..4=trace).

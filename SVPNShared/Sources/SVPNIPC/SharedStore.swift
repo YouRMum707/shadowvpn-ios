@@ -67,6 +67,34 @@ public enum SharedStore {
         return try? decoder.decode(Profile.self, from: data)
     }
 
+    // MARK: Profile list
+
+    /// Persist the full list of saved ``Profile``s the user manages in the
+    /// Profiles tab. Independent of ``writeProfile(_:)`` (which writes only the
+    /// active one the extension reads).
+    public static func writeProfiles(_ profiles: [Profile]) throws {
+        let data = try encoder.encode(profiles)
+        AppGroup.defaults.set(data, forKey: PreferenceKey.profileList)
+    }
+
+    /// Every saved ``Profile``, or an empty array if none has been stored yet
+    /// (e.g. a clean install, or a build that predates the profile list).
+    public static func readProfiles() -> [Profile] {
+        guard let data = AppGroup.defaults.data(forKey: PreferenceKey.profileList) else { return [] }
+        return (try? decoder.decode([Profile].self, from: data)) ?? []
+    }
+
+    /// Persist the identifier of the selected/active ``Profile``.
+    public static func writeSelectedProfileID(_ id: UUID) {
+        AppGroup.defaults.set(id.uuidString, forKey: PreferenceKey.selectedProfileID)
+    }
+
+    /// The identifier of the selected ``Profile``, or `nil` if none is recorded.
+    public static func readSelectedProfileID() -> UUID? {
+        guard let raw = AppGroup.defaults.string(forKey: PreferenceKey.selectedProfileID) else { return nil }
+        return UUID(uuidString: raw)
+    }
+
     // MARK: -
 
     /// Atomically write `data` to `url`, creating the parent directory first

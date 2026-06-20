@@ -157,6 +157,10 @@ targets:
       - path: PacketTunnel/Sources
       - path: Shared/Resources/Country.mmdb
         buildPhase: resources
+      # Precomputed CN CIDR set (from chnroute-gen). Bundling it lets the default
+      # ChinaDNS/split country (CN) skip the one-time on-device mmdb extraction.
+      - path: Shared/Resources/chnroute.txt
+        buildPhase: resources
     info:
       path: PacketTunnel/Info.plist
       properties:

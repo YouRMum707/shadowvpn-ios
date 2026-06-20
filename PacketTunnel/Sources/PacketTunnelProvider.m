@@ -9,6 +9,8 @@
 #import "shadowvpn_core.h"
 #import <os/log.h>
 #import <stdatomic.h>
+#import <netdb.h>
+#import <arpa/inet.h>
 @import Network;
 
 static os_log_t gLog;
@@ -94,11 +96,15 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     NSDictionary *cfg = proto.providerConfiguration ?: @{};
 
     NSString *server = proto.serverAddress ?: cfg[@"server"] ?: @"127.0.0.1:8388";
-    NSString *mode   = [self stringFromConfig:cfg key:@"mode" fallback:@"chnroute"];
+    NSString *mode   = [self stringFromConfig:cfg key:@"mode" fallback:@"full"];
     NSString *dnsLocal  = [self stringFromConfig:cfg key:@"dns_local"  fallback:nil];
     NSString *dnsRemote = [self stringFromConfig:cfg key:@"dns_remote" fallback:nil];
     NSInteger mtu = [self integerFromConfig:cfg key:@"mtu" fallback:1400];
     NSString *country = [self stringFromConfig:cfg key:@"country" fallback:@"CN"];
+    // Tunnel inner client IP (TUN address). Must match the server's peer_ip so
+    // return traffic routes back down the tunnel. Defaults to the reference
+    // server's peer_ip.
+    NSString *peerIP = [self stringFromConfig:cfg key:@"peer_ip" fallback:@"10.9.0.2"];
     _profileID   = [self stringFromConfig:cfg key:@"profileID"   fallback:nil];
     _profileName = [self stringFromConfig:cfg key:@"profileName" fallback:nil];
 
@@ -112,13 +118,27 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
                                             mode:mode
                                      chnrouteURL:chnrouteURL];
 
+    // Resolve the server host to dotted IPv4 literal(s). iOS rejects a bare
+    // hostname as the tunnel remote address, and the resolved IPs double as the
+    // /32 server-bypass routes so the core's carrier socket doesn't loop. Fall
+    // back to the raw host if resolution fails (the engine start will then
+    // surface the real reachability error).
+    NSString *serverHost = [self hostFromHostPort:server];
+    NSArray<NSString *> *serverIPs = [self resolveIPv4ForHost:serverHost];
+    NSString *remoteAddress = serverIPs.firstObject ?: serverHost;
+    if (serverIPs.count == 0) {
+        SVEngineLogf(SVLogError, @"NE: could not resolve server host %@ to an IPv4 address", serverHost);
+    }
+
     NEPacketTunnelNetworkSettings *settings =
-        [SVTunnelSettings makeWithServerAddress:[self hostFromHostPort:server]
+        [SVTunnelSettings makeWithServerAddress:remoteAddress
+                                       tunnelIP:peerIP
                                           mode:mode
                                       dnsLocal:dnsLocal
                                      dnsRemote:dnsRemote
                                            mtu:mtu
-                                   chnrouteURL:chnrouteURL];
+                                   chnrouteURL:chnrouteURL
+                              serverExclusions:serverIPs];
 
     [self writeState:@"connecting" errorMessage:nil];
 
@@ -400,6 +420,18 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
 // later starts. Returns the cache file URL, or nil if the mmdb is missing or the
 // country has no networks (the caller logs and degrades gracefully).
 - (nullable NSURL *)resolveCountryCIDRURLForCountry:(NSString *)country {
+    // Fast path: a precomputed chnroute.txt (CN) is bundled, so the default
+    // country skips the one-time mmdb -> CIDR extraction entirely. Any other
+    // country falls through to the mmdb extraction (cached per country) below.
+    if ([country caseInsensitiveCompare:@"CN"] == NSOrderedSame) {
+        NSURL *bundled = [[NSBundle mainBundle] URLForResource:@"chnroute" withExtension:@"txt"];
+        if (bundled && [[NSFileManager defaultManager] fileExistsAtPath:bundled.path]) {
+            os_log_info(gLog, "using bundled chnroute.txt for CN (skipping mmdb extraction)");
+            SVEngineLog(SVLogInfo, @"NE: using bundled chnroute.txt for CN (no mmdb extraction)");
+            return bundled;
+        }
+    }
+
     NSURL *mmdb = [[NSBundle mainBundle] URLForResource:@"Country" withExtension:@"mmdb"];
     if (!mmdb || ![[NSFileManager defaultManager] fileExistsAtPath:mmdb.path]) {
         os_log_error(gLog, "Country.mmdb not found in extension bundle");
@@ -480,6 +512,9 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
         dict[@"dns_local"]  = [self stringFromConfig:cfg key:@"dns_local"  fallback:@"114.114.114.114:53"];
         dict[@"dns_remote"] = [self stringFromConfig:cfg key:@"dns_remote" fallback:@"8.8.8.8:53"];
     }
+    // Carrier obfuscation ("none" | "quic"). Injected even when the app provided
+    // a ready config_json, so the core always sees the profile's choice.
+    dict[@"obfs"] = [self stringFromConfig:cfg key:@"obfs" fallback:@"none"];
     if (isSplit && chnrouteURL) {
         dict[@"chnroute_path"] = chnrouteURL.path;
     }
@@ -515,6 +550,45 @@ static const NSTimeInterval kEngineRestartDebounceS = 3.0;
     NSRange colon = [hostPort rangeOfString:@":" options:NSBackwardsSearch];
     if (colon.location == NSNotFound) return hostPort;
     return [hostPort substringToIndex:colon.location];
+}
+
+// Resolve a host to its dotted-IPv4 address(es). Returns a de-duplicated list in
+// resolver order, or an empty array if resolution fails. If `host` is already a
+// dotted-IPv4 literal it is returned as-is without a lookup. Synchronous
+// getaddrinfo is acceptable here: startTunnel runs off the main thread and a
+// brief blocking resolve at connect time mirrors what the core would do anyway.
+- (NSArray<NSString *> *)resolveIPv4ForHost:(NSString *)host {
+    if (host.length == 0) return @[];
+
+    struct in_addr literal;
+    if (inet_pton(AF_INET, host.UTF8String, &literal) == 1) {
+        return @[host];
+    }
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;        // IPv4-only tunnel
+    hints.ai_socktype = SOCK_DGRAM;   // the carrier is UDP
+
+    struct addrinfo *results = NULL;
+    int rc = getaddrinfo(host.UTF8String, NULL, &hints, &results);
+    if (rc != 0 || results == NULL) {
+        if (results) freeaddrinfo(results);
+        os_log_error(gLog, "resolve %{public}@ failed: %{public}s", host, gai_strerror(rc));
+        return @[];
+    }
+
+    NSMutableArray<NSString *> *ips = [NSMutableArray array];
+    for (struct addrinfo *ai = results; ai != NULL; ai = ai->ai_next) {
+        if (ai->ai_family != AF_INET || ai->ai_addr == NULL) continue;
+        struct sockaddr_in *sin = (struct sockaddr_in *)ai->ai_addr;
+        char buf[INET_ADDRSTRLEN] = {0};
+        if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)) == NULL) continue;
+        NSString *ip = [NSString stringWithUTF8String:buf];
+        if (ip.length > 0 && ![ips containsObject:ip]) [ips addObject:ip];
+    }
+    freeaddrinfo(results);
+    return ips;
 }
 
 @end

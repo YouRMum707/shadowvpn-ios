@@ -246,6 +246,12 @@ final class VpnManager {
             // The country whose CIDRs bypass the tunnel; the extension derives
             // the route set from the bundled mmdb at start (cached per country).
             config["country"] = profile.bypassCountry
+            // Carrier obfuscation ("none" | "quic" | "base64"); the extension
+            // forwards it into config_json and the core wraps datagrams.
+            config["obfs"] = profile.obfuscation.rawValue
+            // Tunnel inner client IP (the NE TUN address); must match the
+            // server's peer_ip so return traffic routes back down the tunnel.
+            config["peer_ip"] = profile.peerIP
             config["profileID"] = profile.id.uuidString
             config["profileName"] = profile.name
         }

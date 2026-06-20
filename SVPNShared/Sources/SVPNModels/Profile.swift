@@ -21,19 +21,20 @@ public enum Cipher: String, Codable, Sendable, CaseIterable, Identifiable {
     }
 }
 
-/// Split-routing policy for the tunnel. Mirrors `policy::Mode` in the Rust
-/// reference; the raw values are the strings `svpn_tun_start` expects in
-/// `config_json["mode"]`.
+/// Split-routing policy for the tunnel. The raw values are the strings
+/// `svpn_tun_start` expects in `config_json["mode"]`.
 ///
-///  * ``full`` — everything is tunneled (LAN excepted). No China split.
-///  * ``chnroute`` — China CIDRs (`chnroute.txt`) bypass the tunnel; the rest is
-///    tunneled. The load-bearing feature; implemented entirely in Swift via
-///    `NEPacketTunnelNetworkSettings.excludedRoutes`.
-///  * ``chinadns`` — `chnroute` plus the in-FFI split-DNS interceptor that picks
-///    a domestic or clean answer per query (`dns_intercept.rs`).
+///  * ``full`` — everything is tunneled (LAN + the server itself excepted). No
+///    China split.
+///  * ``chinadns`` — China CIDRs (`chnroute.txt`) bypass the tunnel and the rest
+///    is tunneled, plus the in-FFI split-DNS interceptor that picks a domestic or
+///    clean answer per query (`dns_intercept.rs`).
+///
+/// The standalone "China Route" mode (split routing without DNS handling) was
+/// removed; ChinaDNS is the split option. Profiles persisted with the old
+/// `chnroute` raw value migrate to ``full`` via ``Profile``'s tolerant decoder.
 public enum TunnelMode: String, Codable, Sendable, CaseIterable, Identifiable {
     case full
-    case chnroute
     case chinadns
 
     public var id: String { rawValue }
@@ -41,7 +42,6 @@ public enum TunnelMode: String, Codable, Sendable, CaseIterable, Identifiable {
     public var displayName: String {
         switch self {
         case .full: "Full"
-        case .chnroute: "China Route"
         case .chinadns: "ChinaDNS"
         }
     }
@@ -49,6 +49,30 @@ public enum TunnelMode: String, Codable, Sendable, CaseIterable, Identifiable {
     /// Whether this mode runs the in-FFI split-DNS interceptor (i.e. needs the
     /// `dns_local` / `dns_remote` upstreams). Only ``chinadns`` does.
     public var usesSplitDNS: Bool { self == .chinadns }
+}
+
+/// Carrier obfuscation applied to each UDP datagram on the wire. The raw values
+/// are the strings `svpn_tun_start` expects in `config_json["obfs"]`.
+///
+///  * ``none`` — the bare `salt ++ AEAD` envelope (default).
+///  * ``quic`` — wrap each datagram so it looks like a QUIC 1-RTT (HTTP/3)
+///    short-header packet, to evade naive UDP/protocol classification. **The
+///    server must apply the matching de-obfuscation** (see DESIGN.md "QUIC obfs")
+///    or the tunnel won't pass traffic.
+public enum Obfuscation: String, Codable, Sendable, CaseIterable, Identifiable {
+    case none
+    case quic
+    case base64
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .none: "None"
+        case .quic: "HTTP/3 (QUIC)"
+        case .base64: "Base64 (plain text)"
+        }
+    }
 }
 
 /// The user-editable connection profile. Persisted in the App Group via
@@ -100,6 +124,17 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     /// ``TunnelMode/full``.
     public var bypassCountry: String
 
+    /// Carrier obfuscation applied to every datagram on the wire (see
+    /// ``Obfuscation``). Defaults to ``Obfuscation/none``.
+    public var obfuscation: Obfuscation
+
+    /// The tunnel's inner client IPv4 address — what the NE assigns the TUN and
+    /// what the server sees as the packet source. **Must equal the server's
+    /// `peer_ip`** so the server's `peer_ip/24` route can deliver return traffic
+    /// back down the tunnel. Defaults to ``defaultPeerIP`` (`10.9.0.2`), matching
+    /// the reference server config.
+    public var peerIP: String
+
     public init(
         id: UUID = UUID(),
         name: String = "ShadowVPN",
@@ -107,11 +142,13 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         port: Int = 8388,
         password: String = "",
         cipher: Cipher = .chacha20poly1305,
-        mode: TunnelMode = .chnroute,
+        mode: TunnelMode = .full,
         dnsLocal: String = Profile.defaultDNSLocal,
         dnsRemote: String = Profile.defaultDNSRemote,
         mtu: Int = Profile.defaultMTU,
         bypassCountry: String = Profile.defaultBypassCountry,
+        obfuscation: Obfuscation = .none,
+        peerIP: String = Profile.defaultPeerIP,
     ) {
         self.id = id
         self.name = name
@@ -124,6 +161,8 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         self.dnsRemote = dnsRemote
         self.mtu = mtu
         self.bypassCountry = bypassCountry
+        self.obfuscation = obfuscation
+        self.peerIP = peerIP
     }
 
     /// Tolerant decoder: every field falls back to its default when absent, so a
@@ -139,11 +178,18 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
         port = try c.decodeIfPresent(Int.self, forKey: .port) ?? d.port
         password = try c.decodeIfPresent(String.self, forKey: .password) ?? d.password
         cipher = try c.decodeIfPresent(Cipher.self, forKey: .cipher) ?? d.cipher
-        mode = try c.decodeIfPresent(TunnelMode.self, forKey: .mode) ?? d.mode
+        // Tolerant on `mode`: a missing key OR an unknown raw value (e.g. a
+        // profile saved with the removed `chnroute` mode) both fall back to the
+        // default rather than throwing and losing the whole profile.
+        mode = (try? c.decode(TunnelMode.self, forKey: .mode)) ?? d.mode
         dnsLocal = try c.decodeIfPresent(String.self, forKey: .dnsLocal) ?? d.dnsLocal
         dnsRemote = try c.decodeIfPresent(String.self, forKey: .dnsRemote) ?? d.dnsRemote
         mtu = try c.decodeIfPresent(Int.self, forKey: .mtu) ?? d.mtu
         bypassCountry = try c.decodeIfPresent(String.self, forKey: .bypassCountry) ?? d.bypassCountry
+        // Tolerant like `mode`: missing or unknown obfuscation falls back to the
+        // default so an older/newer profile still loads.
+        obfuscation = (try? c.decode(Obfuscation.self, forKey: .obfuscation)) ?? d.obfuscation
+        peerIP = try c.decodeIfPresent(String.self, forKey: .peerIP) ?? d.peerIP
     }
 
     // MARK: Defaults (mirror `config.rs`)
@@ -156,6 +202,9 @@ public struct Profile: Codable, Sendable, Equatable, Identifiable {
     public static let defaultMTU = 1400
     /// Default bypass country: China (the classic chnroute split-tunnel).
     public static let defaultBypassCountry = "CN"
+    /// Default tunnel inner client IP — matches the reference server's `peer_ip`
+    /// so return routing works out of the box.
+    public static let defaultPeerIP = "10.9.0.2"
 
     /// `server:port` as the NE expects it (and as `config_json["server"]`).
     public var serverAddress: String {
@@ -193,6 +242,7 @@ public extension Profile {
             "mtu": mtu,
             "dns_local": dnsLocal,
             "dns_remote": dnsRemote,
+            "obfs": obfuscation.rawValue,
         ]
         if let chnroutePath, mode != .full {
             dict["chnroute_path"] = chnroutePath

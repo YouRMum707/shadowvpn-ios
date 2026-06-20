@@ -13,6 +13,18 @@
 #include <stdlib.h>
 
 /**
+ * Destination Connection ID length, in bytes. Fixed and shared by both ends.
+ * 8 is the most common QUIC DCID length, so it is unremarkable to a classifier.
+ */
+#define DEFAULT_DCID_LEN 8
+
+/**
+ * Upper bound on the obfs header size (`1 + max DCID + max PN`), used to size
+ * receive buffers with headroom regardless of the negotiated `dcid_len`.
+ */
+#define MAX_HEADER ((1 + 20) + 4)
+
+/**
  * AEAD nonce length in bytes. All supported ciphers use a 12-byte nonce.
  */
 #define NONCE_LEN 12

@@ -9,9 +9,10 @@
 // are tunneled. See DESIGN.md "Routing on iOS".
 @interface SVTunnelSettings : NSObject
 
-/// @param serverAddress  Tunnel remote address (the server host/IP), used only
-///                       as the NEPacketTunnelNetworkSettings remote-address
-///                       label — routing is governed by the route sets below.
+/// @param serverAddress  Tunnel remote address. iOS validates this and rejects a
+///                       bare DNS hostname ("Invalid ... tunnelRemoteAddress"),
+///                       so the provider resolves the server host to a dotted
+///                       IPv4 literal before passing it here.
 /// @param mode           "full" | "chnroute" | "chinadns".
 /// @param dnsLocal       Domestic DNS upstream "host:port" (chinadns only).
 /// @param dnsRemote      Clean DNS upstream "host:port" (chinadns only).
@@ -20,10 +21,21 @@
 ///                       the App-Group staged copy). Read for chnroute/chinadns
 ///                       to append every China CIDR as an excluded route. May be
 ///                       nil for "full".
+/// @param serverExclusions  Dotted-IPv4 addresses of the server itself. Each is
+///                       added as a /32 excluded route so the core's encrypted
+///                       UDP socket to the server goes out the physical
+///                       interface instead of looping back into the tunnel
+///                       (essential when the server is outside the bypass set,
+///                       e.g. an overseas server in chnroute mode). May be nil.
+/// @param tunnelIP  The inner client IPv4 address assigned to the TUN (must
+///                   match the server's `peer_ip`). The `10.0.0.0/8` LAN bypass
+///                   is computed to leave this address's `/30` inside the tunnel.
 + (NEPacketTunnelNetworkSettings *)makeWithServerAddress:(NSString *)serverAddress
+                                                tunnelIP:(NSString *)tunnelIP
                                                     mode:(NSString *)mode
                                                 dnsLocal:(nullable NSString *)dnsLocal
                                                dnsRemote:(nullable NSString *)dnsRemote
                                                      mtu:(NSInteger)mtu
-                                             chnrouteURL:(nullable NSURL *)chnrouteURL;
+                                             chnrouteURL:(nullable NSURL *)chnrouteURL
+                                        serverExclusions:(nullable NSArray<NSString *> *)serverExclusions;
 @end

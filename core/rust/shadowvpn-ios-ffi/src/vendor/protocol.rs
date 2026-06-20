@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 //
 // vendored from madeye/shadowvpn (https://github.com/madeye/shadowvpn),
-// local copy at docs/shadowvpn-upstream-ref/ — copied 2026-06-19, unmodified
-// except this provenance header. Upstream is MIT-licensed (see that repo's
+// local copy at docs/shadowvpn-upstream-ref/ — synced 2026-06-20 from upstream
+// main @ 8d14b03 (after PR #14 merged obfs), unmodified except this provenance
+// header and the `crate::`→`super::` module-path rewrites the vendor layout
+// needs. Upstream is MIT-licensed (see that repo's
 // LICENSE). Kept verbatim so it tracks upstream's crypto/DNS wire behavior;
 // edit upstream and re-vendor rather than diverging here.
 

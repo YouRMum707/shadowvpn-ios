@@ -1,6 +1,17 @@
+# Xcode / SwiftPM
 shadowvpn-ios.xcodeproj/
-core/rust/*/target/
-ShadowVPNCore/Frameworks/*.xcframework/
 **/.build/
+**/.swiftpm/
 .DS_Store
 Local.xcconfig
+
+# Build outputs
+build/
+DerivedData/
+
+# Rust
+core/rust/*/target/
+**/target/
+
+# Generated native artifacts
+ShadowVPNCore/Frameworks/*.xcframework/

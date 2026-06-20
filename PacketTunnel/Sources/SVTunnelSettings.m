@@ -10,8 +10,10 @@ static os_log_t gLog;
 // .2 and treats the rest as the peer side. This must be carved back out of the
 // 10/8 LAN exclusion below, otherwise the tunnel's own address range would be
 // declared "direct" and the interface routing would be inconsistent.
-static NSString *const kTunnelAddress    = @"10.8.0.2";
-static NSString *const kTunnelSubnetMask = @"255.255.255.252";  // /30
+// Fallback tunnel inner address if the profile's peer_ip is missing/invalid.
+// Matches the reference server's peer_ip so return routing works by default.
+static NSString *const kDefaultTunnelAddress = @"10.9.0.2";
+static NSString *const kTunnelSubnetMask     = @"255.255.255.252";  // /30
 
 @implementation SVTunnelSettings
 
@@ -22,25 +24,35 @@ static NSString *const kTunnelSubnetMask = @"255.255.255.252";  // /30
 }
 
 + (NEPacketTunnelNetworkSettings *)makeWithServerAddress:(NSString *)serverAddress
+                                                tunnelIP:(NSString *)tunnelIP
                                                     mode:(NSString *)mode
                                                 dnsLocal:(nullable NSString *)dnsLocal
                                                dnsRemote:(nullable NSString *)dnsRemote
                                                      mtu:(NSInteger)mtu
-                                             chnrouteURL:(nullable NSURL *)chnrouteURL {
+                                             chnrouteURL:(nullable NSURL *)chnrouteURL
+                                        serverExclusions:(nullable NSArray<NSString *> *)serverExclusions {
     NEPacketTunnelNetworkSettings *settings =
         [[NEPacketTunnelNetworkSettings alloc] initWithTunnelRemoteAddress:serverAddress];
+
+    // Validate the configured tunnel IP; fall back to the default if it isn't a
+    // dotted IPv4 (so a typo can't wedge the tunnel at a bad address).
+    struct in_addr probe;
+    if (tunnelIP.length == 0 || inet_pton(AF_INET, tunnelIP.UTF8String, &probe) != 1) {
+        os_log_error(gLog, "invalid tunnel IP %{public}@, using %{public}@", tunnelIP, kDefaultTunnelAddress);
+        tunnelIP = kDefaultTunnelAddress;
+    }
 
     // IPv4 — claim the /30 tunnel address and route the default route into the
     // tunnel. The split is implemented as excludedRoutes: anything in the LAN
     // set (and, for chnroute/chinadns, anything in chnroute.txt) bypasses the
     // tunnel and goes out the physical interface directly.
     NEIPv4Settings *ipv4 = [[NEIPv4Settings alloc]
-        initWithAddresses:@[kTunnelAddress]
+        initWithAddresses:@[tunnelIP]
               subnetMasks:@[kTunnelSubnetMask]];
     ipv4.includedRoutes = @[[NEIPv4Route defaultRoute]];
 
     NSMutableArray<NEIPv4Route *> *excluded =
-        [[self ipv4LanExcludedRoutes] mutableCopy];
+        [[self ipv4LanExcludedRoutesForTunnelIP:tunnelIP] mutableCopy];
 
     BOOL isSplit = [mode isEqualToString:@"chnroute"] || [mode isEqualToString:@"chinadns"];
     if (isSplit && chnrouteURL) {
@@ -50,6 +62,22 @@ static NSString *const kTunnelSubnetMask = @"255.255.255.252";  // /30
         SVEngineLogf(SVLogInfo, @"NE: tunnel settings — %lu chnroute exclusions (mode=%@)",
                      (unsigned long)appended, mode);
     }
+
+    // Always send the server's own IP(s) direct. The Rust core opens a UDP socket
+    // to the server from inside this extension; with a default route claimed by
+    // the tunnel, those packets would otherwise route back into the tunnel and
+    // loop. Excluding the server /32 keeps the encrypted carrier on the physical
+    // interface. Matters in every mode when the server isn't already in the
+    // bypass set (e.g. an overseas server in chnroute mode).
+    for (NSString *ip in serverExclusions) {
+        struct in_addr a;
+        if (ip.length == 0 || inet_pton(AF_INET, ip.UTF8String, &a) != 1) continue;
+        [excluded addObject:[[NEIPv4Route alloc] initWithDestinationAddress:ip
+                                                                subnetMask:@"255.255.255.255"]];
+        os_log_info(gLog, "settings: excluded server route %{public}@/32", ip);
+        SVEngineLogf(SVLogInfo, @"NE: tunnel settings — server bypass %@/32", ip);
+    }
+
     ipv4.excludedRoutes = excluded;
     settings.IPv4Settings = ipv4;
 
@@ -58,12 +86,17 @@ static NSString *const kTunnelSubnetMask = @"255.255.255.252";  // /30
     // accepts that residual surface (the upstream client is IPv4-only too) and
     // relies on the path monitor's address-family restart to track v4↔v6 shifts.
 
-    // DNS — only in ChinaDNS mode. We point the system resolver at both the
-    // domestic and the clean upstream IPs and claim every domain ([@""]) so all
-    // lookups funnel through the in-FFI split-DNS interceptor, which decides per
-    // query (via chnroute) whether to serve the domestic or the clean answer.
-    // For full / chnroute we install no NEDNSSettings, so the system DNS is
-    // inherited and split routing alone governs reachability.
+    // DNS. We always install NEDNSSettings and claim every domain ([@""]) so the
+    // OS routes ALL lookups to resolvers we control, through the tunnel —
+    // otherwise iOS keeps using the inherited LAN/ISP resolver, whose queries
+    // never enter the tunnel and get poisoned/leaked (the classic "tunnel is up
+    // but pages won't resolve" failure, confirmed by zero port-53 traffic on the
+    // server's tun).
+    //
+    //  * ChinaDNS: domestic + clean upstreams; the in-FFI split-DNS interceptor
+    //    decides per query (via chnroute) which answer to return.
+    //  * Full (everything else): just the clean upstream, reached through the
+    //    tunnel, so every lookup gets an un-poisoned answer.
     if ([mode isEqualToString:@"chinadns"]) {
         NSMutableArray<NSString *> *servers = [NSMutableArray array];
         NSString *localIP  = [self hostFromHostPort:dnsLocal];
@@ -75,6 +108,13 @@ static NSString *const kTunnelSubnetMask = @"255.255.255.252";  // /30
             dns.matchDomains = @[@""];  // claim every domain
             settings.DNSSettings = dns;
         }
+    } else {
+        NSString *remoteIP = [self hostFromHostPort:dnsRemote] ?: @"8.8.8.8";
+        NEDNSSettings *dns = [[NEDNSSettings alloc] initWithServers:@[remoteIP]];
+        dns.matchDomains = @[@""];  // route every lookup through the tunnel
+        settings.DNSSettings = dns;
+        os_log_info(gLog, "settings: full-mode DNS via %{public}@ (through tunnel)", remoteIP);
+        SVEngineLogf(SVLogInfo, @"NE: full-mode DNS via %@ (through tunnel)", remoteIP);
     }
 
     // MTU from the profile (default 1400). The app's TCP stack derives MSS from
@@ -89,50 +129,57 @@ static NSString *const kTunnelSubnetMask = @"255.255.255.252";  // /30
 // MARK: - LAN exclusions
 
 // The private/link-local/multicast ranges that should always go direct, never
-// through the tunnel. Mirrors meow's set, but the 10/8 block is split into three
-// routes so the tunnel's own /30 (10.8.0.0/30) is NOT excluded — meow could
-// exclude all of 10/8 because its TUN sat in 172.19/16, but ShadowVPN's TUN is
-// inside 10/8 itself. 127/8 is intentionally omitted: iOS rejects a loopback
-// excluded route and drops the entire excludedRoutes payload if one is present.
-+ (NSArray<NEIPv4Route *> *)ipv4LanExcludedRoutes {
-    return @[
-        // 10.0.0.0/8 minus the tunnel /30 at 10.8.0.0/30:
-        //   10.0.0.0/13     covers 10.0.0.0 – 10.7.255.255
-        //   10.8.0.4/30     the three host addresses in 10.8.0.x above the /30
-        //   10.8.0.8/29 .. 10.8.0.0/8 remainder via aggregated supernets
-        // We express the remainder as the minimal set of CIDR blocks that tile
-        // 10.0.0.0/8 while leaving 10.8.0.0/30 unclaimed.
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.0.0.0"   subnetMask:@"255.248.0.0"], // 10.0.0.0/13
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.0.4"   subnetMask:@"255.255.255.252"], // 10.8.0.4/30
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.0.8"   subnetMask:@"255.255.255.248"], // 10.8.0.8/29
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.0.16"  subnetMask:@"255.255.255.240"], // 10.8.0.16/28
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.0.32"  subnetMask:@"255.255.255.224"], // 10.8.0.32/27
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.0.64"  subnetMask:@"255.255.255.192"], // 10.8.0.64/26
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.0.128" subnetMask:@"255.255.255.128"], // 10.8.0.128/25
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.1.0"   subnetMask:@"255.255.255.0"],   // 10.8.1.0/24
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.2.0"   subnetMask:@"255.255.254.0"],   // 10.8.2.0/23
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.4.0"   subnetMask:@"255.255.252.0"],   // 10.8.4.0/22
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.8.0"   subnetMask:@"255.255.248.0"],   // 10.8.8.0/21
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.16.0"  subnetMask:@"255.255.240.0"],   // 10.8.16.0/20
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.32.0"  subnetMask:@"255.255.224.0"],   // 10.8.32.0/19
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.64.0"  subnetMask:@"255.255.192.0"],   // 10.8.64.0/18
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.8.128.0" subnetMask:@"255.255.128.0"],   // 10.8.128.0/17
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.9.0.0"   subnetMask:@"255.255.0.0"],     // 10.9.0.0/16
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.10.0.0"  subnetMask:@"255.254.0.0"],     // 10.10.0.0/15
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.12.0.0"  subnetMask:@"255.252.0.0"],     // 10.12.0.0/14
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.16.0.0"  subnetMask:@"255.240.0.0"],     // 10.16.0.0/12
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.32.0.0"  subnetMask:@"255.224.0.0"],     // 10.32.0.0/11
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.64.0.0"  subnetMask:@"255.192.0.0"],     // 10.64.0.0/10
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"10.128.0.0" subnetMask:@"255.128.0.0"],     // 10.128.0.0/9
-        // 172.16/12 and 192.168/16 private ranges
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"172.16.0.0"    subnetMask:@"255.240.0.0"],
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"192.168.0.0"   subnetMask:@"255.255.0.0"],
-        // Link-local, multicast, limited broadcast
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"169.254.0.0"   subnetMask:@"255.255.0.0"],
-        // 127/8 intentionally omitted — iOS rejects loopback and drops the whole excludedRoutes payload
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"224.0.0.0"     subnetMask:@"240.0.0.0"],
-        [[NEIPv4Route alloc] initWithDestinationAddress:@"255.255.255.255" subnetMask:@"255.255.255.255"],
-    ];
+// through the tunnel. The 10/8 block is special-cased: the ShadowVPN TUN sits
+// inside 10/8 itself, so we exclude all of 10/8 EXCEPT the tunnel's own /30
+// (computed from `tunnelIP`) — that /30 must stay routed into the tunnel.
+// 127/8 is intentionally omitted: iOS rejects a loopback excluded route and
+// drops the entire excludedRoutes payload if one is present.
++ (NSArray<NEIPv4Route *> *)ipv4LanExcludedRoutesForTunnelIP:(NSString *)tunnelIP {
+    NSMutableArray<NEIPv4Route *> *routes = [NSMutableArray array];
+
+    // 10.0.0.0/8 minus the tunnel's /30 (so the tun's own subnet stays in-tunnel).
+    [self appendTen8ExcludingTunnel:tunnelIP into:routes];
+
+    // 172.16/12 and 192.168/16 private ranges.
+    [routes addObject:[[NEIPv4Route alloc] initWithDestinationAddress:@"172.16.0.0"  subnetMask:@"255.240.0.0"]];
+    [routes addObject:[[NEIPv4Route alloc] initWithDestinationAddress:@"192.168.0.0" subnetMask:@"255.255.0.0"]];
+    // Link-local, multicast, limited broadcast.
+    [routes addObject:[[NEIPv4Route alloc] initWithDestinationAddress:@"169.254.0.0" subnetMask:@"255.255.0.0"]];
+    [routes addObject:[[NEIPv4Route alloc] initWithDestinationAddress:@"224.0.0.0"   subnetMask:@"240.0.0.0"]];
+    [routes addObject:[[NEIPv4Route alloc] initWithDestinationAddress:@"255.255.255.255" subnetMask:@"255.255.255.255"]];
+    return routes;
+}
+
+// Append the minimal set of CIDR blocks that tile 10.0.0.0/8 while leaving the
+// tunnel's /30 (the /30 containing `tunnelIP`) unclaimed — i.e. the complement
+// of that /30 within 10/8. This is the standard "exclude one subnet from a
+// supernet" walk: at each prefix length from /9../30 we keep the sibling half
+// that does NOT contain the tunnel and descend into the half that does. That is
+// exactly 22 routes.
++ (void)appendTen8ExcludingTunnel:(NSString *)tunnelIP
+                             into:(NSMutableArray<NEIPv4Route *> *)routes {
+    struct in_addr a;
+    if (inet_pton(AF_INET, tunnelIP.UTF8String, &a) != 1) {
+        return;
+    }
+    uint32_t ip = ntohl(a.s_addr);
+    uint32_t base30 = ip & 0xFFFFFFFCu;        // /30 network containing the tunnel
+    for (uint32_t len = 9; len <= 30; len++) {
+        uint32_t bit = 1u << (32 - len);
+        uint32_t maskNext = 0xFFFFFFFFu << (32 - len);
+        uint32_t halfWithTunnel = base30 & maskNext;
+        uint32_t keepNet = halfWithTunnel ^ bit;  // the sibling half (no tunnel)
+        [routes addObject:[[NEIPv4Route alloc]
+            initWithDestinationAddress:[self dottedAddrForUInt:keepNet]
+                            subnetMask:[self dottedMaskForPrefix:len]]];
+    }
+}
+
+// Format a host-order IPv4 as dotted-decimal.
++ (NSString *)dottedAddrForUInt:(uint32_t)addr {
+    return [NSString stringWithFormat:@"%u.%u.%u.%u",
+            (addr >> 24) & 0xFF, (addr >> 16) & 0xFF,
+            (addr >> 8) & 0xFF, addr & 0xFF];
 }
 
 // MARK: - chnroute parsing

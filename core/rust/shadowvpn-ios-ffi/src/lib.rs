@@ -37,7 +37,9 @@ mod config;
 mod country;
 mod dns_intercept;
 mod engine;
+mod inspect;
 mod logging;
+mod obfs;
 pub mod rss;
 mod vendor;
 
@@ -119,6 +121,11 @@ pub unsafe extern "C" fn svpn_core_set_home_dir(dir: *const c_char) {
     let parsed = cstr_to_str(dir)
         .map(str::to_owned)
         .filter(|s| !s.is_empty());
+    // Point the mirrored log file at <home_dir>/logs/svpn-tunnel.log so the
+    // app's Log view (which tails that file) actually has content to show.
+    if let Some(ref dir) = parsed {
+        logging::set_log_file(dir);
+    }
     logging::bridge_log(&format!("svpn_core_set_home_dir: {parsed:?}"));
 }
 
