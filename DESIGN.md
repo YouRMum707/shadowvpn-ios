@@ -18,9 +18,9 @@ signing setup of the sibling project `../meow-ios`, but the data plane is far
 simpler: ShadowVPN is a raw-IP point-to-point tunnel — **no tun2socks, no lwip, no
 SOCKS, no Clash engine.**
 
-Upstream protocol/reference (Rust): `docs/shadowvpn-upstream-ref/` (a local copy of
-https://github.com/madeye/shadowvpn). The Rust FFI **depends on / points to that
-repo** for the reusable, OS-agnostic modules.
+Upstream protocol/reference (Rust): https://github.com/madeye/shadowvpn. The Rust
+FFI **points to that repo** for the reusable, OS-agnostic modules, vendoring a
+minimal subset of them (see below).
 
 ## What we reuse from meow-ios (read these for patterns)
 - `../meow-ios/project.yml` — XcodeGen spec (app + PacketTunnel app-extension + a
@@ -87,7 +87,7 @@ Add `shadowvpn = { git = "https://github.com/madeye/shadowvpn" }` and reuse:
 `aarch64-apple-ios`. **First** try the git dep and `cargo build --target
 aarch64-apple-ios`. **If it fails to compile for iOS**, fall back to vendoring ONLY
 the iOS-safe modules into this crate by copying `crypto.rs`, `protocol.rs`,
-`policy/chnroute.rs`, `policy/dns.rs` from `docs/shadowvpn-upstream-ref/src/` (keep
+`policy/chnroute.rs`, `policy/dns.rs` from upstream `src/` (keep
 the upstream MIT header + a `// vendored from madeye/shadowvpn` note). Do NOT bring
 tun-rs / maxminddb / route / dnsconf into the iOS build. chnroute on iOS is a plain
 text file (no mmdb at runtime). Document whichever path you took at the top of
@@ -233,8 +233,8 @@ shadowsocks AEAD envelope. Selected per profile via `config_json["obfs"]`
 (`"none"` default, or `"quic"`). **Both ends must agree**; the server applies the
 exact inverse (`shadowvpn-server` reads `"obfs": "quic"` in `server.json`).
 
-Implemented in `core/rust/shadowvpn-ios-ffi/src/obfs.rs` (client) and
-`docs/shadowvpn-upstream-ref/src/obfs.rs` (server) — keep the two byte-compatible.
+Implemented in `core/rust/shadowvpn-ios-ffi/src/obfs.rs` (client) and upstream
+`src/obfs.rs` (server, madeye/shadowvpn) — keep the two byte-compatible.
 
 ### Wire format
 
